@@ -152,14 +152,16 @@ class Control:
 
     @property
     def observation_space(self):
-        spaces = {'obs': self._env.observation_space(), 'image': gym.spaces.Box(
-            0, 255, self._size + (3,), dtype=np.uint8)}
+        spaces = {
+            'obs': self._env.observation_space,
+            'image': gym.spaces.Box(0, 255, self._size + (3,), dtype=np.uint8)
+        }
         return gym.spaces.Dict(spaces)
 
     @property
     def action_space(self):
-        action = self._env.action_space()
-        return gym.spaces.Dict({'action': action})
+        return gym.spaces.Dict({'action': self._env.action_space})
+
 
     def step(self, action):
         action = action['action']
