@@ -120,12 +120,12 @@ Any further steps are undefined behavior.
         self.steps_beyond_done = None
         return np.array(self.state)
 
-    def render(self, mode="human"):
+    def render(self, mode='rgb_array'):
         screen_width = 600
         screen_height = 400
 
         world_width = self.x_threshold * 2
-        scale = screen_width / world_width
+        scale = screen_width/world_width
         carty = 100  # TOP OF CART
         polewidth = 10.0
         polelen = scale * (2 * self.length)
@@ -134,7 +134,6 @@ Any further steps are undefined behavior.
 
         if self.viewer is None:
             from gym.envs.classic_control import rendering
-
             self.viewer = rendering.Viewer(screen_width, screen_height)
             l, r, t, b = -cartwidth / 2, cartwidth / 2, cartheight / 2, -cartheight / 2
             axleoffset = cartheight / 4.0
@@ -142,22 +141,17 @@ Any further steps are undefined behavior.
             self.carttrans = rendering.Transform()
             cart.add_attr(self.carttrans)
             self.viewer.add_geom(cart)
-            l, r, t, b = (
-                -polewidth / 2,
-                polewidth / 2,
-                polelen - polewidth / 2,
-                -polewidth / 2,
-            )
+            l, r, t, b = -polewidth / 2, polewidth / 2, polelen - polewidth / 2, -polewidth / 2
             pole = rendering.FilledPolygon([(l, b), (l, t), (r, t), (r, b)])
-            pole.set_color(0.8, 0.6, 0.4)
+            pole.set_color(.8, .6, .4)
             self.poletrans = rendering.Transform(translation=(0, axleoffset))
             pole.add_attr(self.poletrans)
             pole.add_attr(self.carttrans)
             self.viewer.add_geom(pole)
-            self.axle = rendering.make_circle(polewidth / 2)
+            self.axle = rendering.make_circle(polewidth/2)
             self.axle.add_attr(self.poletrans)
             self.axle.add_attr(self.carttrans)
-            self.axle.set_color(0.5, 0.5, 0.8)
+            self.axle.set_color(.5, .5, .8)
             self.viewer.add_geom(self.axle)
             self.track = rendering.Line((0, carty), (screen_width, carty))
             self.track.set_color(0, 0, 0)
@@ -170,12 +164,7 @@ Any further steps are undefined behavior.
 
         # Edit the pole polygon vertex
         pole = self._pole_geom
-        l, r, t, b = (
-            -polewidth / 2,
-            polewidth / 2,
-            polelen - polewidth / 2,
-            -polewidth / 2,
-        )
+        l, r, t, b = -polewidth / 2, polewidth / 2, polelen - polewidth / 2, -polewidth / 2
         pole.v = [(l, b), (l, t), (r, t), (r, b)]
 
         x = self.state
@@ -183,7 +172,7 @@ Any further steps are undefined behavior.
         self.carttrans.set_translation(cartx, carty)
         self.poletrans.set_rotation(-x[2])
 
-        return self.viewer.render(return_rgb_array=mode == "rgb_array")
+        return self.viewer.render(return_rgb_array=mode == 'rgb_array')
 
     def close(self):
         if self.viewer:
