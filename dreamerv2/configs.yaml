@@ -116,6 +116,28 @@ dmc:
   kl.free: 1.0
   dataset.oversample_ends: False
 
+control:
+
+  task: control_CartPoleContinuous
+  time_limit: 200
+  action_repeat: 1
+  eval_every: 200
+  log_every: 200
+  prefill: 1000
+  train_every: 5
+  pretrain: 100
+  pred_discount: False
+  grad_heads: [image, reward]
+  rssm: {hidden: 200, deter: 200}
+  model_opt.lr: 3e-4
+  actor_opt.lr: 8e-5
+  critic_opt.lr: 8e-5
+  actor_ent: 1e-4
+  discount: 0.99
+  actor_grad: dynamics
+  kl.free: 1.0
+  dataset.oversample_ends: False
+
 debug:
 
   jit: False
