@@ -129,39 +129,25 @@ class Atari:
 
 
 class Control:
-    def __init__(self, name, action_repeat=1, size=(64, 64), camera=None):
-        # os.environ['MUJOCO_GL'] = 'egl'
-        # domain, task = name.split('_', 1)
-        # if domain == 'cup':  # Only domain with multiple words.
-        #     domain = 'ball_in_cup'
-        # if isinstance(domain, str):
-        # from dm_control import suite
-        # self._env = suite.load(domain, task)
-        # else:
-        #     assert task is None
-        #     self._env = domain()
+    def __init__(self, name, action_repeat=1, size=(64, 64)):
         if name == "CartPoleContinuous":
             self._env = ContinuousCartPoleEnv()
         else:
             self._env = gym.make(name)
         self._action_repeat = action_repeat
         self._size = size
-        # if camera is None:
-        #     camera = dict(quadruped=2).get(domain, 0)
-        # self._camera = camera
 
     @property
     def observation_space(self):
         spaces = {
             'obs': self._env.observation_space,
-            'image': gym.spaces.Box(0, 255, self._size + (3,), dtype=np.uint8)
+            # 'image': gym.spaces.Box(0, 255, self._size + (3,), dtype=np.uint8)
         }
         return gym.spaces.Dict(spaces)
 
     @property
     def action_space(self):
         return gym.spaces.Dict({'action': self._env.action_space})
-
 
     def step(self, action):
         action = action['action']
@@ -174,14 +160,14 @@ class Control:
                 break
         obs = dict()
         obs['obs'] = observation
-        obs['image'] = self.render(width=64, height=64)
+        # obs['image'] = self.render(width=64, height=64)
         return obs, reward, done, info
 
     def reset(self):
         observation = self._env.reset()
         obs = dict()
         obs['obs'] = observation
-        obs['image'] = self.render(width=64, height=64)
+        # obs['image'] = self.render(width=64, height=64)
         return obs
 
     def render(self, *args, **kwargs):
