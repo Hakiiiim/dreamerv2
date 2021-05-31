@@ -8,10 +8,11 @@ import expl
 
 class Agent(common.Module):
 
-    def __init__(self, config, logger, actspce, step, dataset):
+    def __init__(self, config, logger, observation_space, actspce, step, dataset):
         self.config = config
         self._logger = logger
         self._action_space = actspce
+        self._observation_space = observation_space
         self._num_act = actspce.n if hasattr(actspce, 'n') else actspce.shape[0]
         self._should_expl = elements.Until(int(
             config.expl_until / config.action_repeat))
@@ -19,7 +20,7 @@ class Agent(common.Module):
         with tf.device('cpu:0'):
             self.step = tf.Variable(int(self._counter), tf.int64)
         self._dataset = dataset
-        self.wm = WorldModel(self.step, config)
+        self.wm = WorldModel(self.step, self._observation_space, config)
         self._task_behavior = ActorCritic(config, self.step, self._num_act)
         reward = lambda f, s, a: self.wm.heads['reward'](f).mode()
         self._expl_behavior = dict(
@@ -38,14 +39,18 @@ class Agent(common.Module):
         tf.py_function(lambda: self.step.assign(
             int(self._counter), read_value=False), [], [])
         if state is None:
-            latent = self.wm.rssm.initial(len(obs['image']))
-            action = tf.zeros((len(obs['image']), self._num_act))
+            latent = self.wm.rssm.initial(len(obs['obs']))
+            action = tf.zeros((len(obs['obs']), self._num_act))
             state = latent, action
         elif obs['reset'].any():
             state = tf.nest.map_structure(lambda x: x * common.pad_dims(
                 1.0 - tf.cast(obs['reset'], x.dtype), len(x.shape)), state)
         latent, action = state
-        embed = self.wm.encoder(self.wm.preprocess(obs))
+
+        # embed = self.wm.encoder(self.wm.preprocess(obs))
+        # add formatting into float16 due to type mismatch in nets.py:110
+        embed = tf.cast(obs['obs'], tf.float16)
+
         sample = (mode == 'train') or not self.config.eval_state_mean
         latent, _ = self.wm.rssm.obs_step(latent, action, embed, sample)
         feat = self.wm.rssm.get_feat(latent)
@@ -94,42 +99,77 @@ class Agent(common.Module):
 
 class WorldModel(common.Module):
 
-    def __init__(self, step, config):
+    def __init__(self, step, observation_space, config):
         self.step = step
         self.config = config
         self.rssm = common.RSSM(**config.rssm)
-        self.heads = {}
-        shape = config.image_size + (1 if config.grayscale else 3,)
-        self.encoder = common.ConvEncoder(**config.encoder)
-        self.heads['image'] = common.ConvDecoder(shape, **config.decoder)
-        self.heads['reward'] = common.MLP([], **config.reward_head)
+        # add a decoder for the observation directly
+        self.heads = {'obs': common.MLP(observation_space.shape[0], **config.obs_head),
+                      'reward': common.MLP([], **config.reward_head)}
+
+        # no images are involved
+
+        # shape = config.image_size + (1 if config.grayscale else 3,)
+        # self.encoder = common.ConvEncoder(**config.encoder)
+        # self.heads['image'] = common.ConvDecoder(shape, **config.decoder)
+
+        # add discount head if required
         if config.pred_discount:
             self.heads['discount'] = common.MLP([], **config.discount_head)
+
+        # make sure all differentiated heads exist
         for name in config.grad_heads:
             assert name in self.heads, name
+
+        # initialize optimizer
         self.model_opt = common.Optimizer('model', **config.model_opt)
 
     def train(self, data, state=None):
+        # train the wm
         with tf.GradientTape() as model_tape:
+            # compute loss
             model_loss, state, outputs, metrics = self.loss(data, state)
-        modules = [self.encoder, self.rssm, *self.heads.values()]
+
+        # modules = [self.encoder, self.rssm, *self.heads.values()]
+        modules = [self.rssm, *self.heads.values()]
+
         metrics.update(self.model_opt(model_tape, model_loss, modules))
         return state, outputs, metrics
 
     def loss(self, data, state=None):
+        # preprocess: normalize image, clip reward, scale discount
         data = self.preprocess(data)
-        embed = self.encoder(data)
+
+        # encode image
+        # embed = self.encoder(data)
+
+        # MAJOR CHANGE: embed becomes the observation, instead of ConvEncoder(image)
+
+        # add formatting into float16 due to type mismatch in nets.py:110
+        embed = tf.cast(data['obs'], tf.float16)
+
         post, prior = self.rssm.observe(embed, data['action'], state)
         kl_loss, kl_value = self.rssm.kl_loss(post, prior, **self.config.kl)
+
         assert len(kl_loss.shape) == 0
+
+        # likelihood
         likes = {}
         losses = {'kl': kl_loss}
+
+        # (h,z)
         feat = self.rssm.get_feat(post)
         for name, head in self.heads.items():
             grad_head = (name in self.config.grad_heads)
+
+            # input of the heads of the network
             inp = feat if grad_head else tf.stop_gradient(feat)
+
+            # log prob
             like = tf.cast(head(inp).log_prob(data[name]), tf.float32)
             likes[name] = like
+
+            # nll loss
             losses[name] = -like.mean()
         model_loss = sum(
             self.config.loss_scales.get(k, 1.0) * v for k, v in losses.items())
@@ -147,29 +187,45 @@ class WorldModel(common.Module):
         start = {k: flatten(v) for k, v in start.items()}
 
         def step(prev, _):
+            # prev is (start, feat, action)
             state, _, _ = prev
+
+            # get (h,z)
             feat = self.rssm.get_feat(state)
+
+            # call actor
             action = policy(tf.stop_gradient(feat)).sample()
+
+            # compute prior
             succ = self.rssm.img_step(state, action)
             return succ, feat, action
 
+        # start trajectory at (h,z)=(0,0)
         feat = 0 * self.rssm.get_feat(start)
+
+        # call your actor to select actions
         action = policy(feat).mode()
+
+        # apply the step function recursively for horizon steps
         succs, feats, actions = common.static_scan(
             step, tf.range(horizon), (start, feat, action))
+
         states = {k: tf.concat([
             start[k][None], v[:-1]], 0) for k, v in succs.items()}
+
         if 'discount' in self.heads:
             discount = self.heads['discount'](feats).mean()
         else:
             discount = self.config.discount * tf.ones_like(feats[..., 0])
+
+        # return imagined trajectories
         return feats, states, actions, discount
 
     @tf.function
     def preprocess(self, obs):
-        dtype = prec.global_policy().compute_dtype
+        # dtype = prec.global_policy().compute_dtype
         obs = obs.copy()
-        obs['image'] = tf.cast(obs['image'], dtype) / 255.0 - 0.5
+        # obs['image'] = tf.cast(obs['image'], dtype) / 255.0 - 0.5
         obs['reward'] = getattr(tf, self.config.clip_rewards)(obs['reward'])
         if 'discount' in obs:
             obs['discount'] *= self.config.discount
