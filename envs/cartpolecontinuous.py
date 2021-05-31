@@ -120,9 +120,9 @@ Any further steps are undefined behavior.
         self.steps_beyond_done = None
         return np.array(self.state)
 
-    def render(self, mode='rgb_array'):
-        screen_width = 600
-        screen_height = 400
+    def render(self, mode='rgb_array', width=64, height=64):
+        screen_width = width
+        screen_height = height
 
         world_width = self.x_threshold * 2
         scale = screen_width/world_width
