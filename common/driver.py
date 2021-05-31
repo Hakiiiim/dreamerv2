@@ -28,6 +28,7 @@ class Driver:
             for i, done in enumerate(self._dones):
                 if done:
                     self._obs[i] = self._envs[i].reset()
+                    # self._eps = List[episode = List[Dict(Transition = obs, rew, dis)]]
                     self._eps[i] = [{**self._obs[i], 'reward': 0.0, 'discount': 1.0}]
             obs = {k: np.stack([o[k] for o in self._obs]) for k in self._obs[0]}
             actions, self._state = policy(obs, self._state, **self._kwargs)
