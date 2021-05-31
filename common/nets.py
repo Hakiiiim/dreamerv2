@@ -24,6 +24,8 @@ class RSSM(common.Module):
         self._cast = lambda x: tf.cast(x, prec.global_policy().compute_dtype)
 
     def initial(self, batch_size):
+        # initialize h_0 with zeros
+        # state is h
         dtype = prec.global_policy().compute_dtype
         if self._discrete:
             state = dict(
@@ -40,32 +42,46 @@ class RSSM(common.Module):
 
     @tf.function
     def observe(self, embed, action, state=None):
+        # embed is the image passed through the ConvEncoder
+        # state is h_{t-1}
+
         swap = lambda x: tf.transpose(x, [1, 0] + list(range(2, len(x.shape))))
         if state is None:
+            # if no previous h is given, initialize it
             state = self.initial(tf.shape(action)[0])
+
         embed, action = swap(embed), swap(action)
-        post, prior = common.static_scan(
+
+        # post is p(z|h,x), and prior is p(z|h)
+        post, prior = common.static_scan(  # obs_step compute prior and posterior
             lambda prev, inputs: self.obs_step(prev[0], *inputs),
             (action, embed), (state, state))
+
+        # post is {'stoch': z, 'deter': h, **stats}
         post = {k: swap(v) for k, v in post.items()}
+
+        # prior is {'stoch': z, 'deter': h, **stats}
         prior = {k: swap(v) for k, v in prior.items()}
+
         return post, prior
 
     @tf.function
     def imagine(self, action, state=None):
+        # rollout imaginary trajectories
         swap = lambda x: tf.transpose(x, [1, 0] + list(range(2, len(x.shape))))
         if state is None:
+            # initialize h_t if state is none
             state = self.initial(tf.shape(action)[0])
         assert isinstance(state, dict), state
-        print("swap test 1")
         action = swap(action)
-        print("swap test 2")
+        # compute trajectory starting from state "start"
+        # use only prior over stochastic latent state p(z|h), no images involved
         prior = common.static_scan(self.img_step, action, state)
         prior = {k: swap(v) for k, v in prior.items()}
-        print("swap test 3")
         return prior
 
     def get_feat(self, state):
+        # get_feature which is (h,z)
         stoch = self._cast(state['stoch'])
         if self._discrete:
             shape = stoch.shape[:-2] + [self._stoch * self._discrete]
@@ -73,6 +89,7 @@ class RSSM(common.Module):
         return tf.concat([stoch, state['deter']], -1)
 
     def get_dist(self, state):
+        # get distribution from: logits -> discrete, mean/std -> normal
         if self._discrete:
             logit = state['logit']
             logit = tf.cast(logit, tf.float32)
@@ -86,35 +103,67 @@ class RSSM(common.Module):
 
     @tf.function
     def obs_step(self, prev_state, prev_action, embed, sample=True):
+        # get prior p(z|h)
         prior = self.img_step(prev_state, prev_action, sample)
+
+        # concat h and ConvEncoder(x) (x being the image)
         x = tf.concat([prior['deter'], embed], -1)
+
+        # get posterior p(z|h,x)
         x = self.get('obs_out', tfkl.Dense, self._hidden, self._act)(x)
+
+        # stats is {'mean': mean, 'std': std}
         stats = self._suff_stats_layer('obs_dist', x)
         dist = self.get_dist(stats)
+
+        # sample z
         stoch = dist.sample() if sample else dist.mode()
+
+        # stoch is z, deter is h
         post = {'stoch': stoch, 'deter': prior['deter'], **stats}
         return post, prior
 
     @tf.function
     def img_step(self, prev_state, prev_action, sample=True):
+        # compute prior p(z|h)
+
         prev_stoch = self._cast(prev_state['stoch'])
         prev_action = self._cast(prev_action)
         if self._discrete:
             shape = prev_stoch.shape[:-2] + [self._stoch * self._discrete]
             prev_stoch = tf.reshape(prev_stoch, shape)
+
+        # concatenate a_{t-1} and z_{t-1}
         x = tf.concat([prev_stoch, prev_action], -1)
+
+        # forward into a dense net
         x = self.get('img_in', tfkl.Dense, self._hidden, self._act)(x)
+
+        # deter is h_{t-1}
         deter = prev_state['deter']
+
+        # feed x (a_{t-1} and z_{t-1}'s embedding) and h_{t-1} to GRU cell
+        # output is x=h, deter=[h]
         x, deter = self._cell(x, [deter])
+
+        # deter is now h_t
         deter = deter[0]  # Keras wraps the state in a list.
+
+        # pass h to transition predictor to get \hat{z}
         x = self.get('img_out', tfkl.Dense, self._hidden, self._act)(x)
+
+        # stats is {'mean': mean, 'std': std}
         stats = self._suff_stats_layer('img_dist', x)
         dist = self.get_dist(stats)
+
+        # sample \hat{z}
         stoch = dist.sample() if sample else dist.mode()
+
         prior = {'stoch': stoch, 'deter': deter, **stats}
         return prior
 
     def _suff_stats_layer(self, name, x):
+        # compute distribution's stats: mean, std
         if self._discrete:
             x = self.get(name, tfkl.Dense, self._stoch * self._discrete, None)(x)
             logit = tf.reshape(x, x.shape[:-1] + [self._stoch, self._discrete])
@@ -131,6 +180,7 @@ class RSSM(common.Module):
             return {'mean': mean, 'std': std}
 
     def kl_loss(self, post, prior, forward, balance, free, free_avg):
+        # kl loss between prior and posterior distributions of z
         kld = tfd.kl_divergence
         sg = lambda x: tf.nest.map_structure(tf.stop_gradient, x)
         lhs, rhs = (prior, post) if forward else (post, prior)
@@ -233,6 +283,7 @@ class MLP(common.Module):
         return self.get('out', DistLayer, self._shape, **self._out)(x)
 
 
+# ((z, a), h) -> h
 class GRUCell(tf.keras.layers.AbstractRNNCell):
 
     def __init__(self, size, norm=False, act=tf.tanh, update_bias=-1, **kwargs):
@@ -263,6 +314,7 @@ class GRUCell(tf.keras.layers.AbstractRNNCell):
         cand = self._act(reset * cand)
         update = tf.nn.sigmoid(update + self._update_bias)
         output = update * cand + (1 - update) * state
+        # output is h
         return output, [output]
 
 
