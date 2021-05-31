@@ -130,6 +130,7 @@ train_dataset = iter(train_replay.dataset(**config.dataset))
 eval_dataset = iter(eval_replay.dataset(**config.dataset))
 agnt = agent.Agent(config, logger, action_space, step, train_dataset)
 if (logdir / 'variables.pkl').exists():
+    print('Load agent')
     agnt.load(logdir / 'variables.pkl')
 else:
     config.pretrain and print('Pretrain agent.')
@@ -140,13 +141,19 @@ else:
 def train_step(tran):
     if should_train(step):
         for _ in range(config.train_steps):
+            # first train wm on dataset, then train sac on imagined trajectories
             _, mets = agnt.train(next(train_dataset))
+            print("----------")
+            print("metrics: \n")
+            print(mets)
+            print("----------")
             [metrics[key].append(value) for key, value in mets.items()]
     if should_log(step):
         for name, values in metrics.items():
             logger.scalar(name, np.array(values, np.float64).mean())
             metrics[name].clear()
-        logger.add(agnt.report(next(train_dataset)), prefix='train')
+        # video_pred gives dim errors in tf.transpose() !!
+        # logger.add(agnt.report(next(train_dataset)), prefix='train')
         logger.write(fps=True)
 
 
@@ -155,7 +162,8 @@ train_driver.on_step(train_step)
 while step < config.steps:
     logger.write()
     print('Start evaluation.')
-    logger.add(agnt.report(next(eval_dataset)), prefix='eval')
+    # video_pred gives dim errors in tf.transpose() !!
+    # logger.add(agnt.report(next(eval_dataset)), prefix='eval')
     eval_driver(functools.partial(agnt.policy, mode='eval'), episodes=1)
     print('Start training.')
     train_driver(agnt.policy, steps=config.eval_every)
