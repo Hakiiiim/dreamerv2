@@ -101,8 +101,8 @@ def per_episode(ep, mode):
     logger.scalar(f'{mode}_return', score)
     logger.scalar(f'{mode}_length', length)
     logger.scalar(f'{mode}_eps', replay_.num_episodes)
-    if mode == 'eval' or config.train_gifs:
-        logger.video(f'{mode}_policy', ep['image'])
+    # if mode == 'eval' or config.train_gifs:
+    #     logger.video(f'{mode}_policy', ep['image'])
     logger.write()
 
 
@@ -110,6 +110,7 @@ print('Create envs.')
 train_envs = [make_env('train') for _ in range(config.num_envs)]
 eval_envs = [make_env('eval') for _ in range(config.num_envs)]
 action_space = train_envs[0].action_space['action']
+observation_space = train_envs[0].observation_space['obs']
 train_driver = common.Driver(train_envs)
 train_driver.on_episode(lambda ep: per_episode(ep, mode='train'))
 train_driver.on_step(lambda _: step.increment())
@@ -128,7 +129,7 @@ if prefill:
 print('Create agent.')
 train_dataset = iter(train_replay.dataset(**config.dataset))
 eval_dataset = iter(eval_replay.dataset(**config.dataset))
-agnt = agent.Agent(config, logger, action_space, step, train_dataset)
+agnt = agent.Agent(config, logger, observation_space, action_space, step, train_dataset)
 if (logdir / 'variables.pkl').exists():
     print('Load agent')
     agnt.load(logdir / 'variables.pkl')
@@ -143,10 +144,6 @@ def train_step(tran):
         for _ in range(config.train_steps):
             # first train wm on dataset, then train sac on imagined trajectories
             _, mets = agnt.train(next(train_dataset))
-            print("----------")
-            print("metrics: \n")
-            print(mets)
-            print("----------")
             [metrics[key].append(value) for key, value in mets.items()]
     if should_log(step):
         for name, values in metrics.items():
@@ -161,12 +158,16 @@ train_driver.on_step(train_step)
 
 while step < config.steps:
     logger.write()
+
     print('Start evaluation.')
     # video_pred gives dim errors in tf.transpose() !!
     # logger.add(agnt.report(next(eval_dataset)), prefix='eval')
     eval_driver(functools.partial(agnt.policy, mode='eval'), episodes=1)
+
     print('Start training.')
     train_driver(agnt.policy, steps=config.eval_every)
+
+    # the next line prints "save checkpoint ..."
     agnt.save(logdir / 'variables.pkl')
 for env in train_envs + eval_envs:
     try:
