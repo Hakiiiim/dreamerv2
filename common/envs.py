@@ -174,20 +174,20 @@ class Control:
                 break
         obs = dict()
         obs['obs'] = observation
-        obs['image'] = self.render()
+        obs['image'] = self.render(width=64, height=64)
         return obs, reward, done, info
 
     def reset(self):
         observation = self._env.reset()
         obs = dict()
         obs['obs'] = observation
-        obs['image'] = self.render()
+        obs['image'] = self.render(width=64, height=64)
         return obs
 
     def render(self, *args, **kwargs):
         if kwargs.get('mode', 'rgb_array') != 'rgb_array':
             raise ValueError("Only render mode 'rgb_array' is supported.")
-        return self._env.render()
+        return self._env.render(width=64, height=64)
 
 
 class Dummy:
