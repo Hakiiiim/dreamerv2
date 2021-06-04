@@ -76,7 +76,6 @@ class Atari:
             self, name, action_repeat=4, size=(84, 84), grayscale=True, noops=30,
             life_done=False, sticky_actions=True, all_actions=False):
         assert size[0] == size[1]
-        import gym.wrappers
         import gym.envs.atari
         if name == 'james_bond':
             name = 'jamesbond'
@@ -174,7 +173,6 @@ class Control:
         if kwargs.get('mode', 'rgb_array') != 'rgb_array':
             raise ValueError("Only render mode 'rgb_array' is supported.")
         return self._env.render(width=64, height=64)
-
 
 class Dummy:
 
