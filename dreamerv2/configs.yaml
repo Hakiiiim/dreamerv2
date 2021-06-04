@@ -120,35 +120,41 @@ dmc:
 control:
 
   task: control_CartPoleContinuous
-  time_limit: 200
-  steps: 1e4
+  time_limit: 1000
+  steps: 1e6
   action_repeat: 1
-  eval_every: 200
-  log_every: 200
-  train_every: 5 # important !!!!
+  eval_every: 1000
+  log_every: 1000
+  train_every: 50 # important !!!!
   train_steps: 1
-  prefill: 1000
+  prefill: 10000
   pretrain: 1
   pred_discount: False
   grad_heads: [obs, reward]
-  model_opt.lr: 3e-4
-  actor_opt.lr: 8e-5
-  critic_opt.lr: 8e-5
+  model_opt.lr: 1e-3
+  actor_opt.lr: 3e-4
+  critic_opt.lr: 3e-4
   actor_ent: 1e-4
   discount: 0.99
   actor_grad: dynamics
   kl.free: 1.0
+
   dataset.oversample_ends: False
-  dataset.batch: 10
-  dataset.length: 5 # important !!!!
-  actor: { layers: 4, units: 200, act: elu, dist: trunc_normal, min_std: 0.1 }
-  critic: { layers: 4, units: 200, act: elu, dist: mse }
-  rssm: { hidden: 200, deter: 200, stoch: 32, discrete: 32, act: elu, std_act: sigmoid2,
+  dataset.batch: 50
+  dataset.length: 50 # important !!!!
+
+  actor: { layers: 1, units: 256, act: elu, dist: trunc_normal, min_std: 0.1 }
+  critic: { layers: 1, units: 256, act: elu, dist: mse }
+  rssm: { hidden: 64, deter: 64, stoch: 8, discrete: 8, act: elu, std_act: sigmoid2,
           min_std: 0.1 }
+  reward_head: { layers: 1, units: 256, act: elu, dist: mse }
+  obs_head: { layers: 1, units: 256, act: elu, dist: mse }
+
+  discount_head: { layers: 4, units: 32, act: elu, dist: binary }
+
   encoder: { depth: 24, act: elu, kernels: [ 4, 4, 4, 4 ], keys: [ image ] }
   decoder: { depth: 24, act: elu, kernels: [ 5, 5, 6, 6 ] }
-  reward_head: { layers: 4, units: 32, act: elu, dist: mse }
-  discount_head: { layers: 4, units: 32, act: elu, dist: binary }
+
   # default:
   # actor: { layers: 4, units: 400, act: elu, dist: trunc_normal, min_std: 0.1 }
   # critic: { layers: 4, units: 400, act: elu, dist: mse }
@@ -159,7 +165,7 @@ control:
   # discount_head: { layers: 4, units: 400, act: elu, dist: binary }
 
   # Add obs decoder config
-  obs_head: { layers: 4, units: 200, act: elu, dist: mse }
+
 
 
 debug:
