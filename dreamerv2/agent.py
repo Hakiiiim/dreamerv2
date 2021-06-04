@@ -320,9 +320,12 @@ class ActorCritic(common.Module):
         reward = tf.cast(reward, tf.float32)
         disc = tf.cast(disc, tf.float32)
         value = self._target_critic(feat).mode()
+
+        # compute lambda return value objective
         target = common.lambda_return(
             reward[:-1], value[:-1], disc[:-1],
             bootstrap=value[-1], lambda_=self.config.discount_lambda, axis=0)
+
         weight = tf.stop_gradient(tf.math.cumprod(tf.concat(
             [tf.ones_like(disc[:1]), disc[:-1]], 0), 0))
         metrics = {}
