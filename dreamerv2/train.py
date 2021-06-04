@@ -5,6 +5,7 @@ import os
 import pathlib
 import sys
 import warnings
+import timeit
 
 try:
     import rich.traceback
@@ -90,13 +91,16 @@ def make_env(mode):
     env = common.ResetObs(env)
     return env
 
-
+# report and add episode to replay_buffer (train/eval)
 def per_episode(ep, mode):
     length = len(ep['reward']) - 1
     score = float(ep['reward'].astype(np.float64).sum())
     print(f'{mode.title()} episode has {length} steps and return {score:.1f}.')
+
+    # add to replay buffers
     replay_ = dict(train=train_replay, eval=eval_replay)[mode]
     replay_.add(ep)
+
     logger.scalar(f'{mode}_transitions', replay_.num_transitions)
     logger.scalar(f'{mode}_return', score)
     logger.scalar(f'{mode}_length', length)
@@ -109,11 +113,16 @@ def per_episode(ep, mode):
 print('Create envs.')
 train_envs = [make_env('train') for _ in range(config.num_envs)]
 eval_envs = [make_env('eval') for _ in range(config.num_envs)]
+
+# get action and observation spaces
 action_space = train_envs[0].action_space['action']
 observation_space = train_envs[0].observation_space['obs']
+
+# initialize drivers (trainer)
 train_driver = common.Driver(train_envs)
 train_driver.on_episode(lambda ep: per_episode(ep, mode='train'))
 train_driver.on_step(lambda _: step.increment())
+
 eval_driver = common.Driver(eval_envs)
 eval_driver.on_episode(lambda ep: per_episode(ep, mode='eval'))
 
@@ -121,30 +130,45 @@ prefill = max(0, config.prefill - train_replay.total_steps)
 if prefill:
     print(f'Prefill dataset ({prefill} steps).')
     random_agent = common.RandomAgent(action_space, logprob=True)
+
+    # run the experiment and fill replay_buffers
     train_driver(random_agent, steps=prefill, episodes=1)
     eval_driver(random_agent, episodes=1)
+
+    # reset
     train_driver.reset()
     eval_driver.reset()
 
 print('Create agent.')
+# set training and eval datasets: tf.data.Dataset.from_generator
 train_dataset = iter(train_replay.dataset(**config.dataset))
 eval_dataset = iter(eval_replay.dataset(**config.dataset))
+
 agnt = agent.Agent(config, logger, observation_space, action_space, step, train_dataset)
+
 if (logdir / 'variables.pkl').exists():
     print('Load agent')
     agnt.load(logdir / 'variables.pkl')
 else:
     config.pretrain and print('Pretrain agent.')
     for _ in range(config.pretrain):
+        # iterating over dataset yields a batch B of episodes of length L
         agnt.train(next(train_dataset))
 
 
 def train_step(tran):
+    # every config.train_every
     if should_train(step):
         for _ in range(config.train_steps):
             # first train wm on dataset, then train sac on imagined trajectories
+            # print("Start training the World model and TaskBehavior")
+            start = timeit.default_timer()
             _, mets = agnt.train(next(train_dataset))
+            stop = timeit.default_timer()
+            print(f"time to train model and ac: {stop - start}s")
+            # print("Training finished")
             [metrics[key].append(value) for key, value in mets.items()]
+    # every config.log_every
     if should_log(step):
         for name, values in metrics.items():
             logger.scalar(name, np.array(values, np.float64).mean())
