@@ -20,12 +20,17 @@ class RSSM(common.Module):
         self._act = getattr(tf.nn, act) if isinstance(act, str) else act
         self._std_act = std_act
         self._min_std = min_std
+
+        # hidden size of gru cell is self._deter
         self._cell = GRUCell(self._deter, norm=True)
+
         self._cast = lambda x: tf.cast(x, prec.global_policy().compute_dtype)
 
     def initial(self, batch_size):
-        # initialize h_0 with zeros
-        # state is h
+        # initialize with zeros
+        # state is (logit, z, h) if z is categorical
+        # and (mean, std, z, h) if z is Gaussian
+        # stoch for z, and deter for h
         dtype = prec.global_policy().compute_dtype
         if self._discrete:
             state = dict(
@@ -62,6 +67,8 @@ class RSSM(common.Module):
 
         # prior is {'stoch': z, 'deter': h, **stats}
         prior = {k: swap(v) for k, v in prior.items()}
+
+        # stats is {'mean': mean, 'std': std} or {'logit': logit} if categorical
 
         return post, prior
 
@@ -152,7 +159,7 @@ class RSSM(common.Module):
         # pass h to transition predictor to get \hat{z}
         x = self.get('img_out', tfkl.Dense, self._hidden, self._act)(x)
 
-        # stats is {'mean': mean, 'std': std}
+        # stats is {'mean': mean, 'std': std} or {'logit': logit} if categorical
         stats = self._suff_stats_layer('img_dist', x)
         dist = self.get_dist(stats)
 
@@ -163,7 +170,7 @@ class RSSM(common.Module):
         return prior
 
     def _suff_stats_layer(self, name, x):
-        # compute distribution's stats: mean, std
+        # compute distribution's stats: mean, std if Gaussian, logit if Categorical
         if self._discrete:
             x = self.get(name, tfkl.Dense, self._stoch * self._discrete, None)(x)
             logit = tf.reshape(x, x.shape[:-1] + [self._stoch, self._discrete])
